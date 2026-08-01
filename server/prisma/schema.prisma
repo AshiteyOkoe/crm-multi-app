@@ -1,0 +1,491 @@
+// ============================================================
+//  CRM Database Schema (Prisma) — PostgreSQL
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+//  ENUMS
+// ============================================================
+
+enum Role {
+  ADMIN // Business Owner (Super Admin)
+  BRANCH_MANAGER
+  SALES_STAFF // Cashier
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  PROPOSAL_SENT
+  NEGOTIATION
+  WON
+  LOST
+}
+
+enum LeadSource {
+  REFERRAL
+  WEBSITE
+  SOCIAL_MEDIA
+  WALK_IN
+  CALL
+  OTHER
+}
+
+enum CustomerSegment {
+  VIP
+  REGULAR
+  INACTIVE
+  NEW
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  MOBILE_MONEY
+}
+
+enum SaleStatus {
+  COMPLETED
+  REFUNDED
+  VOID
+}
+
+enum TransferStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  COMPLETED
+}
+
+enum ReturnStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum FollowUpType {
+  CALL
+  MEETING
+  EMAIL
+  REMINDER
+}
+
+enum FollowUpStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+}
+
+enum InteractionType {
+  CALL
+  EMAIL
+  MEETING
+  NOTE
+  WHATSAPP
+}
+
+enum NotificationType {
+  FOLLOW_UP
+  LEAD_ASSIGNED
+  DEAL_STATUS
+  TASK_OVERDUE
+  LOW_STOCK
+  RETURN
+  TRANSFER
+  SALES
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+  SMS
+}
+
+// ============================================================
+//  ORGANIZATION
+// ============================================================
+
+model Branch {
+  id        String   @id @default(cuid())
+  name      String
+  code      String   @unique
+  address   String?
+  phone     String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users            User[]
+  customers        Customer[]
+  leads            Lead[]
+  products         BranchProduct[]
+  sales            Sale[]
+  returns          Return[]
+  transfersFrom    StockTransfer[] @relation("TransferFrom")
+  transfersTo      StockTransfer[] @relation("TransferTo")
+
+  @@index([name])
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  phone        String?
+  role         Role     @default(SALES_STAFF)
+  avatarUrl    String?
+  isActive     Boolean  @default(true)
+  branchId     String?
+  branch       Branch?  @relation(fields: [branchId], references: [id])
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  leadsCreated     Lead[]     @relation("LeadCreatedBy")
+  leadsAssigned    Lead[]     @relation("LeadAssignedTo")
+  interactions     Interaction[]
+  opportunities    Opportunity[]
+  followUps        FollowUp[]
+  tasks            Task[]
+  sales            Sale[]
+  notifications    Notification[]
+  transferRequests StockTransfer[] @relation("TransferRequestedBy")
+  transferApprovals StockTransfer[] @relation("TransferApprovedBy")
+  returnsRequested Return[] @relation("ReturnRequestedBy")
+  returnApprovals  Return[] @relation("ReturnApprovedBy")
+  customersCreated Customer[]
+
+  @@index([branchId])
+  @@index([role])
+}
+
+// ============================================================
+//  CRM — CUSTOMERS & LEADS
+// ============================================================
+
+model Customer {
+  id            String   @id @default(cuid())
+  name          String
+  email         String?
+  phone         String?
+  company       String?
+  address       String?
+  notes         String?
+  segment       CustomerSegment @default(REGULAR)
+  birthday      DateTime?
+  anniversary   DateTime?
+  preferredBranchId String?
+  preferredBranch   Branch? @relation(fields: [preferredBranchId], references: [id])
+  createdById   String?
+  createdBy     User?    @relation(fields: [createdById], references: [id])
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  interactions  Interaction[]
+  opportunities Opportunity[]
+  followUps     FollowUp[]
+  sales         Sale[]
+  convertedFromLeads Lead[] @relation("LeadConverted")
+
+  @@index([name])
+  @@index([phone])
+  @@index([email])
+  @@index([segment])
+}
+
+model Lead {
+  id         String   @id @default(cuid())
+  name       String
+  company    String?
+  email      String?
+  phone      String?
+  source     LeadSource @default(OTHER)
+  status     LeadStatus @default(NEW)
+  value      Float    @default(0)
+  notes      String?
+  createdById   String?
+  createdBy     User?  @relation("LeadCreatedBy", fields: [createdById], references: [id])
+  assignedToId  String?
+  assignedTo    User?  @relation("LeadAssignedTo", fields: [assignedToId], references: [id])
+  branchId   String?
+  branch     Branch?  @relation(fields: [branchId], references: [id])
+  wonAt      DateTime?
+  lostAt     DateTime?
+  convertedCustomerId String?
+  convertedCustomer   Customer? @relation("LeadConverted", fields: [convertedCustomerId], references: [id])
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  interactions  Interaction[]
+  opportunities Opportunity[]
+  followUps     FollowUp[]
+
+  @@index([status])
+  @@index([assignedToId])
+  @@index([phone])
+}
+
+model Interaction {
+  id        String   @id @default(cuid())
+  type      InteractionType @default(NOTE)
+  subject   String?
+  notes     String
+  date      DateTime @default(now())
+  customerId String?
+  customer  Customer? @relation(fields: [customerId], references: [id])
+  leadId    String?
+  lead      Lead?    @relation(fields: [leadId], references: [id])
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+
+  @@index([customerId])
+  @@index([leadId])
+  @@index([date])
+}
+
+model Opportunity {
+  id            String   @id @default(cuid())
+  name          String
+  stage         LeadStatus @default(NEW)
+  value         Float    @default(0)
+  expectedCloseDate DateTime?
+  probability   Int      @default(20)
+  customerId    String?
+  customer      Customer? @relation(fields: [customerId], references: [id])
+  leadId        String?
+  lead          Lead?    @relation(fields: [leadId], references: [id])
+  ownerId       String?
+  owner         User?    @relation(fields: [ownerId], references: [id])
+  wonAt         DateTime?
+  lostAt        DateTime?
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([stage])
+  @@index([ownerId])
+}
+
+model FollowUp {
+  id          String   @id @default(cuid())
+  type        FollowUpType @default(CALL)
+  subject     String
+  notes       String?
+  scheduledAt DateTime
+  status      FollowUpStatus @default(SCHEDULED)
+  customerId  String?
+  customer    Customer? @relation(fields: [customerId], references: [id])
+  leadId      String?
+  lead        Lead?    @relation(fields: [leadId], references: [id])
+  assigneeId  String?
+  assignee    User?    @relation(fields: [assigneeId], references: [id])
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([scheduledAt])
+  @@index([status])
+  @@index([assigneeId])
+}
+
+model Task {
+  id          String      @id @default(cuid())
+  title       String
+  description String?
+  status      TaskStatus  @default(PENDING)
+  priority    TaskPriority @default(MEDIUM)
+  dueDate     DateTime?
+  relatedType String? // LEAD | CUSTOMER | OPPORTUNITY
+  relatedId   String?
+  assigneeId  String?
+  assignee    User?       @relation(fields: [assigneeId], references: [id])
+  createdById String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([status])
+  @@index([assigneeId])
+  @@index([dueDate])
+}
+
+// ============================================================
+//  SALES & INVENTORY
+// ============================================================
+
+model Product {
+  id        String   @id @default(cuid())
+  name      String
+  sku       String   @unique
+  category  String?
+  description String?
+  price     Float    @default(0)
+  cost      Float    @default(0)
+  lowStockThreshold Int @default(5)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  branchStock  BranchProduct[]
+  saleItems    SaleItem[]
+  transfers    StockTransfer[]
+
+  @@index([name])
+  @@index([category])
+}
+
+model BranchProduct {
+  branchId   String
+  productId  String
+  quantity   Int      @default(0)
+  updatedAt  DateTime @updatedAt
+
+  branch  Branch  @relation(fields: [branchId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+
+  @@id([branchId, productId])
+}
+
+model Sale {
+  id            String   @id @default(cuid())
+  invoiceNo     String   @unique
+  branchId      String
+  branch        Branch   @relation(fields: [branchId], references: [id])
+  userId        String?
+  user          User?    @relation(fields: [userId], references: [id])
+  customerId    String?
+  customer      Customer? @relation(fields: [customerId], references: [id])
+  paymentMethod PaymentMethod @default(CASH)
+  subtotal      Float    @default(0)
+  discount      Float    @default(0)
+  tax           Float    @default(0)
+  total         Float    @default(0)
+  status        SaleStatus @default(COMPLETED)
+  notes         String?
+  createdAt     DateTime @default(now())
+
+  items    SaleItem[]
+  returns  Return[]
+
+  @@index([branchId])
+  @@index([createdAt])
+  @@index([invoiceNo])
+}
+
+model SaleItem {
+  id        String  @id @default(cuid())
+  saleId    String
+  sale      Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+  productName String
+  quantity  Int
+  unitPrice Float
+  lineTotal Float
+}
+
+model Return {
+  id         String   @id @default(cuid())
+  saleId     String
+  sale       Sale     @relation(fields: [saleId], references: [id])
+  branchId   String
+  branch     Branch   @relation(fields: [branchId], references: [id])
+  userId     String?
+  user       User?    @relation("ReturnRequestedBy", fields: [userId], references: [id])
+  approvedById String?
+  approvedBy User?    @relation("ReturnApprovedBy", fields: [approvedById], references: [id])
+  amount     Float
+  reason     String
+  status     ReturnStatus @default(PENDING)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([status])
+  @@index([branchId])
+}
+
+model StockTransfer {
+  id            String   @id @default(cuid())
+  productId     String
+  product       Product  @relation(fields: [productId], references: [id])
+  fromBranchId  String
+  fromBranch    Branch   @relation("TransferFrom", fields: [fromBranchId], references: [id])
+  toBranchId    String
+  toBranch      Branch   @relation("TransferTo", fields: [toBranchId], references: [id])
+  quantity      Int
+  status        TransferStatus @default(PENDING)
+  requestedById String?
+  requestedBy   User?    @relation("TransferRequestedBy", fields: [requestedById], references: [id])
+  approvedById  String?
+  approvedBy    User?    @relation("TransferApprovedBy", fields: [approvedById], references: [id])
+  note          String?
+  completedAt   DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([status])
+  @@index([fromBranchId])
+}
+
+// ============================================================
+//  NOTIFICATIONS & AUDIT
+// ============================================================
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  type      NotificationType @default(FOLLOW_UP)
+  channel   NotificationChannel @default(IN_APP)
+  title     String
+  message   String
+  link      String?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([isRead])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  userEmail String?
+  action    String
+  entityType String?
+  entityId  String?
+  details   Json?
+  branchId  String?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([entityType])
+  @@index([createdAt])
+}
+
+model AppSetting {
+  key        String   @id
+  value      String
+  updatedAt  DateTime @updatedAt
+}

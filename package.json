@@ -1,0 +1,15 @@
+{
+  "name": "branch-crm",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Multi-branch CRM monorepo (Next.js client + Express API + PostgreSQL)",
+  "scripts": {
+    "dev": "node scripts/dev.js",
+    "db": "node server/scripts/db.mjs",
+    "server": "npm run dev --prefix server",
+    "client": "npm run dev --prefix client",
+    "typecheck": "npm run typecheck --prefix server && npm run typecheck --prefix client",
+    "build": "npm run build --prefix server && npm run build --prefix client"
+  }
+}

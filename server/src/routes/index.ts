@@ -1,0 +1,22 @@
+import { Router } from 'express';
+import authRoutes from './auth.routes';
+import branchRoutes from './branch.routes';
+import customerRoutes from './customer.routes';
+import leadRoutes from './lead.routes';
+import saleRoutes from './sale.routes';
+import inventoryRoutes from './inventory.routes';
+import taskRoutes from './task.routes';
+import reportRoutes from './report.routes';
+
+const router = Router();
+
+router.use('/auth', authRoutes);
+router.use('/branches', branchRoutes);
+router.use('/customers', customerRoutes);
+router.use('/leads', leadRoutes);
+router.use('/sales', saleRoutes);
+router.use('/inventory', inventoryRoutes);
+router.use('/tasks', taskRoutes);
+router.use('/reports', reportRoutes);
+
+export default router;
