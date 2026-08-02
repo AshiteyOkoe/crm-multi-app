@@ -34,8 +34,7 @@ export const listProducts = asyncHandler(async (req: AuthRequest, res) => {
 });
 
 export const createProduct = asyncHandler(async (req: AuthRequest, res) => {
-  if (req.user!.role === 'SALES_STAFF') forbidden('Only managers and admins can create products');
-  const data = productSchema
+  if (req.user!.role === 'SALES_STAFF') forbidden('Only managers and admins can create products');  const data = productSchema
     .extend({
       stock: z.array(z.object({ branchId: z.string().min(1), quantity: z.number().int().min(0) })).optional(),
     })
@@ -259,4 +258,103 @@ export const decideTransfer = asyncHandler(async (req: AuthRequest, res) => {
   });
   await writeAuditLog({ userId: req.user!.id, userEmail: req.user!.email, action: 'TRANSFER_COMPLETED', entityType: 'StockTransfer', entityId: transfer.id, branchId: transfer.toBranchId });
   return ok(res, updated);
+});
+
+// ======================= BARCODE LOOKUP =======================
+
+// POS fast-add: find a product by SKU / barcode and return its branch stock.
+export const lookupByBarcode = asyncHandler(async (req: AuthRequest, res) => {
+  const sku = decodeURIComponent(req.params.sku ?? '').trim().toUpperCase();
+  if (!sku) badRequest('A barcode / SKU is required');
+  const product = await prisma.product.findFirst({ where: { OR: [{ sku: { equals: sku, mode: 'insensitive' } }], isActive: true } });
+  if (!product) notFound('No product found for this barcode / SKU');
+
+  const branchId = req.query.branchId as string | undefined;
+  const scope = branchScope(req.user!);
+  const stock = await prisma.branchProduct.findMany({
+    where: { ...scope, productId: product.id, ...(branchId ? { branchId } : {}) },
+    include: { branch: { select: { id: true, name: true, code: true } } },
+  });
+  return ok(res, { product, stock });
+});
+
+// ======================= CSV IMPORT =======================
+
+function parseCsv(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cur = '';
+  let inQuotes = false;
+  const src = text.replace(/\r\n/g, '\n');
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (src[i + 1] === '"') { cur += '"'; i++; }
+        else inQuotes = false;
+      } else cur += ch;
+    } else if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === ',') {
+      row.push(cur); cur = '';
+    } else if (ch === '\n') {
+      row.push(cur); rows.push(row); row = []; cur = '';
+    } else {
+      cur += ch;
+    }
+  }
+  row.push(cur); rows.push(row);
+  return rows.filter((r) => r.some((c) => c.trim() !== ''));
+}
+
+// Bulk-create products. Expected columns:
+// name, sku, price, cost, category, lowStockThreshold, branchCode, quantity
+export const importProducts = asyncHandler(async (req: AuthRequest, res) => {
+  if (req.user!.role === 'SALES_STAFF') forbidden('Only managers and admins can import products');
+  const schema = z.object({ csv: z.string().min(1) });
+  const data = schema.parse(req.body);
+
+  const rows = parseCsv(data.csv);
+  if (rows.length < 2) badRequest('CSV must contain a header row and at least one data row');
+  const header = rows[0].map((h) => h.trim().toLowerCase());
+  const idx = (name: string) => header.indexOf(name);
+
+  const branchByCode = new Map<string, string>();
+  const branches = await prisma.branch.findMany({ select: { id: true, code: true } });
+  for (const b of branches) branchByCode.set(b.code.toUpperCase(), b.id);
+
+  const createdItems: any[] = [];
+  const skipped: string[] = [];
+  let errors = 0;
+
+  for (const row of rows.slice(1)) {
+    const name = row[idx('name')]?.trim();
+    const sku = row[idx('sku')]?.trim();
+    if (!name || !sku) { errors++; continue; }
+    const price = Number(row[idx('price')] ?? 0);
+    const cost = Number(row[idx('cost')] ?? 0);
+    const category = row[idx('category')]?.trim() || null;
+    const lowStockThreshold = Number(row[idx('lowstockthreshold')] ?? 5);
+
+    const existing = await prisma.product.findUnique({ where: { sku } });
+    if (existing) { skipped.push(sku); continue; }
+
+    const product = await prisma.$transaction(async (tx) => {
+      const p = await tx.product.create({
+        data: { name, sku, category, price: isNaN(price) ? 0 : price, cost: isNaN(cost) ? 0 : cost, lowStockThreshold: isNaN(lowStockThreshold) ? 5 : lowStockThreshold },
+      });
+      const branchCode = row[idx('branchcode')]?.trim().toUpperCase();
+      const qty = Number(row[idx('quantity')] ?? 0);
+      if (branchCode && branchByCode.has(branchCode)) {
+        const branchId = branchByCode.get(branchCode)!;
+        if (req.user!.role !== 'ADMIN' && branchId !== req.user!.branchId) throw forbidden('You can only import stock for your own branch');
+        await tx.branchProduct.create({ data: { branchId, productId: p.id, quantity: isNaN(qty) ? 0 : qty } });
+      }
+      return p;
+    });
+    createdItems.push({ id: product.id, name: product.name, sku: product.sku });
+  }
+
+  await writeAuditLog({ userId: req.user!.id, userEmail: req.user!.email, action: 'PRODUCTS_IMPORTED', details: { created: createdItems.length, skipped: skipped.length, errors } });
+  return created(res, { created: createdItems.length, skipped, errors, products: createdItems });
 });

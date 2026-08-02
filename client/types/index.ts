@@ -1,9 +1,14 @@
-export type Role = "ADMIN" | "BRANCH_MANAGER" | "SALES_STAFF";
+export type Role = "ADMIN" | "BRANCH_MANAGER" | "SALES_STAFF" | "AUDITOR";
 
 export type LeadStatus = "NEW" | "CONTACTED" | "QUALIFIED" | "PROPOSAL_SENT" | "NEGOTIATION" | "WON" | "LOST";
 export type LeadSource = "REFERRAL" | "WEBSITE" | "SOCIAL_MEDIA" | "WALK_IN" | "CALL" | "OTHER";
 export type CustomerSegment = "VIP" | "REGULAR" | "INACTIVE" | "NEW";
-export type PaymentMethod = "CASH" | "CARD" | "MOBILE_MONEY";
+export type PaymentMethod = "CASH" | "CARD" | "MOBILE_MONEY" | "CREDIT";
+export type PaymentStatus = "PAID" | "PARTIAL" | "UNPAID";
+export type ExpenseCategory = "RENT" | "SALARIES" | "UTILITIES" | "SUPPLIES" | "MARKETING" | "MAINTENANCE" | "TRANSPORT" | "OTHER";
+export type ShiftStatus = "OPEN" | "CLOSED";
+export type CampaignType = "BIRTHDAY" | "ANNIVERSARY" | "INACTIVE" | "CUSTOM";
+export type CampaignStatus = "DRAFT" | "SCHEDULED" | "SENT";
 export type TaskStatus = "PENDING" | "IN_PROGRESS" | "COMPLETED";
 export type TaskPriority = "LOW" | "MEDIUM" | "HIGH";
 export type FollowUpType = "CALL" | "MEETING" | "EMAIL" | "REMINDER";
@@ -12,6 +17,7 @@ export type TransferStatus = "PENDING" | "APPROVED" | "REJECTED" | "COMPLETED";
 export type ReturnStatus = "PENDING" | "APPROVED" | "REJECTED";
 export type SaleStatus = "COMPLETED" | "REFUNDED" | "VOID";
 export type NotificationType = "FOLLOW_UP" | "LEAD_ASSIGNED" | "DEAL_STATUS" | "TASK_OVERDUE" | "LOW_STOCK" | "RETURN" | "TRANSFER" | "SALES";
+export type LoyaltyTier = "BRONZE" | "SILVER" | "GOLD";
 
 export interface Branch {
   id: string;
@@ -33,6 +39,7 @@ export interface User {
   branchId?: string | null;
   branch?: { id: string; name: string; code: string } | null;
   isActive?: boolean;
+  emailVerified?: boolean;
   createdAt?: string;
 }
 
@@ -47,6 +54,12 @@ export interface Customer {
   segment: CustomerSegment;
   birthday?: string | null;
   anniversary?: string | null;
+  points?: number;
+  totalPointsEarned?: number;
+  tier?: LoyaltyTier;
+  creditLimit?: number;
+  creditBalance?: number;
+  creditAvailable?: number;
   preferredBranchId?: string | null;
   preferredBranch?: { id: string; name: string; code: string } | null;
   createdAt: string;
@@ -105,14 +118,22 @@ export interface Sale {
   userId?: string | null;
   user?: { id: string; name: string } | null;
   customerId?: string | null;
-  customer?: { id: string; name: string; phone?: string | null } | null;
+  customer?: { id: string; name: string; phone?: string | null; email?: string | null; points?: number } | null;
   paymentMethod: PaymentMethod;
+  paymentStatus?: PaymentStatus;
+  amountPaid?: number;
+  creditUsed?: number;
+  currency?: string;
   subtotal: number;
   discount: number;
   tax: number;
   total: number;
+  pointsEarned?: number;
+  pointsRedeemed?: number;
+  pointsDiscount?: number;
   status: SaleStatus;
   notes?: string | null;
+  pending?: boolean;
   items: SaleItem[];
   createdAt: string;
   returns?: { id: string; status: ReturnStatus }[];
@@ -169,7 +190,7 @@ export interface FollowUp {
   scheduledAt: string;
   status: FollowUpStatus;
   customerId?: string | null;
-  customer?: { id: string; name: string; phone?: string | null } | null;
+  customer?: { id: string; name: string; phone?: string | null; email?: string | null; points?: number } | null;
   leadId?: string | null;
   lead?: { id: string; name: string; phone?: string | null } | null;
   assigneeId?: string | null;
@@ -213,6 +234,73 @@ export interface Interaction {
   userId?: string | null;
   user?: { name: string } | null;
 }
+
+export interface Expense {
+  id: string;
+  branchId: string;
+  branch?: { id: string; name: string; code: string } | null;
+  category: ExpenseCategory;
+  description: string;
+  amount: number;
+  expenseDate: string;
+  createdBy?: { name: string } | null;
+  createdAt: string;
+}
+
+export interface CustomerPayment {
+  id: string;
+  customerId: string;
+  branchId: string;
+  branch?: { id: string; name: string; code: string } | null;
+  amount: number;
+  method: PaymentMethod;
+  note?: string | null;
+  createdBy?: { name: string } | null;
+  createdAt: string;
+}
+
+export interface Shift {
+  id: string;
+  userId: string;
+  user?: { id: string; name: string } | null;
+  branchId: string;
+  branch?: { id: string; name: string; code: string } | null;
+  clockIn: string;
+  clockOut?: string | null;
+  openingCash: number;
+  closingCash?: number | null;
+  expectedCash?: number | null;
+  variance?: number | null;
+  notes?: string | null;
+  status: ShiftStatus;
+}
+
+export interface Campaign {
+  id: string;
+  name: string;
+  type: CampaignType;
+  status: CampaignStatus;
+  channel: "EMAIL" | "SMS" | "WHATSAPP" | "IN_APP";
+  message: string;
+  scheduledAt?: string | null;
+  sentAt?: string | null;
+  branch?: { id: string; name: string; code: string } | null;
+  createdBy?: { name: string } | null;
+  createdAt: string;
+  recipients?: { id: string; status: string; customer?: { name: string } | null }[];
+  _count?: { recipients: number };
+}
+
+export const EXPENSE_CATEGORY_LABELS: Record<ExpenseCategory, string> = {
+  RENT: "Rent",
+  SALARIES: "Salaries",
+  UTILITIES: "Utilities",
+  SUPPLIES: "Supplies",
+  MARKETING: "Marketing",
+  MAINTENANCE: "Maintenance",
+  TRANSPORT: "Transport",
+  OTHER: "Other",
+};
 
 export interface DashboardData {
   kpis: {
@@ -294,6 +382,7 @@ export const ROLE_LABELS: Record<Role, string> = {
   ADMIN: "Owner",
   BRANCH_MANAGER: "Branch Manager",
   SALES_STAFF: "Sales Staff",
+  AUDITOR: "Auditor (read-only)",
 };
 
 export const SEGMENT_LABELS: Record<CustomerSegment, string> = {

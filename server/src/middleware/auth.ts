@@ -45,3 +45,20 @@ export function authorize(...roles: Role[]) {
     next();
   };
 }
+
+// Global guard: AUDITOR (read-only accountant) may only use safe HTTP methods.
+// Applied once in app.ts — it verifies the token and blocks writes before any route runs.
+export function readOnlyGuard(req: Request, _res: Response, next: NextFunction) {
+  if (req.method === 'GET' || req.method === 'OPTIONS') return next();
+  const header = req.headers.authorization;
+  if (!header || !header.startsWith('Bearer ')) return next();
+  try {
+    const payload = jwt.verify(header.slice(7), env.jwtSecret) as AuthUser;
+    if (payload.role === 'AUDITOR') {
+      return next(forbidden('Auditor accounts are read-only'));
+    }
+  } catch {
+    // token invalid → let authenticate handle it
+  }
+  next();
+}

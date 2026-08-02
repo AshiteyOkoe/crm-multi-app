@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Plus, Store, Users, ScrollText, ShieldCheck } from "lucide-react";
+import { Plus, Store, Users, ScrollText, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { useApp } from "@/context/AppContext";
 import { api } from "@/lib/api";
 import { formatDateTime } from "@/lib/utils";
@@ -33,11 +33,12 @@ export default function SettingsPage() {
 
   return (
     <div>
-      <PageHeader breadcrumb="Settings" title="Administration" subtitle="Manage branches, team, security and audit logs" />
+      <PageHeader breadcrumb="Settings" title="Administration" subtitle="Manage branches, team, preferences, security and audit logs" />
       <Tabs
         tabs={[
           { key: "branches", label: "Branches" },
           { key: "team", label: "Team & roles" },
+          { key: "prefs", label: "Business settings" },
           { key: "audit", label: "Audit logs" },
         ]}
         active={tab}
@@ -46,8 +47,164 @@ export default function SettingsPage() {
       <div className="pt-5">
         {tab === "branches" && <BranchesTab />}
         {tab === "team" && <TeamTab />}
+        {tab === "prefs" && <PreferencesTab />}
         {tab === "audit" && <AuditTab />}
       </div>
+    </div>
+  );
+}
+
+function PreferencesTab() {
+  const [form, setForm] = useState({
+    businessName: "",
+    currency: "GHS",
+    taxRate: "0",
+    lowStockAlertEnabled: "true",
+    receiptFooter: "",
+    receiptChannels: "EMAIL,WHATSAPP",
+    loyaltyEnabled: "true",
+    creditEnabled: "true",
+    smsWebhookUrl: "",
+    whatsappWebhookUrl: "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    api<Record<string, string>>("/branches/settings").then((s) => {
+      setForm((f) => ({
+        ...f,
+        businessName: s.businessName ?? f.businessName,
+        currency: s.currency ?? f.currency,
+        taxRate: s.taxRate ?? "0",
+        lowStockAlertEnabled: s.lowStockAlertEnabled ?? "true",
+        receiptFooter: s.receiptFooter ?? "",
+        receiptChannels: s.receiptChannels ?? f.receiptChannels,
+        loyaltyEnabled: s.loyaltyEnabled ?? "true",
+        creditEnabled: s.creditEnabled ?? "true",
+        smsWebhookUrl: s.smsWebhookUrl ?? "",
+        whatsappWebhookUrl: s.whatsappWebhookUrl ?? "",
+      }));
+    });
+  }, []);
+
+  const submit = async () => {
+    setError(null);
+    setSaved(false);
+    setSaving(true);
+    try {
+      await api("/branches/settings", { method: "PUT", body: { ...form, taxRate: Number(form.taxRate) } });
+      setSaved(true);
+    } catch (err: any) {
+      setError(err?.message ?? "Could not save settings");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+      <Card className="p-5">
+        <div className="mb-4 flex items-center gap-2">
+          <SlidersHorizontal className="h-4 w-4 text-brand-600" />
+          <h3 className="text-sm font-semibold text-gray-900">Business & money</h3>
+        </div>
+        <div className="space-y-4">
+          <Field label="Business name"><Input value={form.businessName} onChange={(e) => setForm((f) => ({ ...f, businessName: e.target.value }))} /></Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Currency code">
+              <Select value={form.currency} onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))}>
+                <option value="GHS">GHS (₵)</option>
+                <option value="USD">USD ($)</option>
+                <option value="EUR">EUR (€)</option>
+                <option value="GBP">GBP (£)</option>
+                <option value="NGN">NGN (₦)</option>
+                <option value="KES">KES (KSh)</option>
+                <option value="ZAR">ZAR (R)</option>
+              </Select>
+            </Field>
+            <Field label="Default tax rate (%)">
+              <Input type="number" min="0" max="100" step="0.1" value={form.taxRate} onChange={(e) => setForm((f) => ({ ...f, taxRate: e.target.value }))} />
+            </Field>
+          </div>
+          <Field label="Receipt footer" hint="Shown at the bottom of every printed/emailed receipt.">
+            <Input value={form.receiptFooter} onChange={(e) => setForm((f) => ({ ...f, receiptFooter: e.target.value }))} placeholder="Thank you for shopping with us!" />
+          </Field>
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-gray-600">Receipt delivery channels (new sales)</p>
+            <div className="flex flex-wrap gap-2">
+              {(["EMAIL", "SMS", "WHATSAPP"] as const).map((c) => {
+                const enabled = form.receiptChannels.split(",").map((s) => s.trim()).filter(Boolean).includes(c);
+                return (
+                  <button
+                    key={c}
+                    onClick={() => {
+                      const list = form.receiptChannels.split(",").map((s) => s.trim()).filter(Boolean);
+                      const next = enabled ? list.filter((x) => x !== c) : [...list, c];
+                      setForm((f) => ({ ...f, receiptChannels: next.join(",") }));
+                    }}
+                    className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${enabled ? "border-brand-500 bg-brand-50 text-brand-700" : "border-gray-200 text-gray-500"}`}
+                  >
+                    {enabled ? `✓ ${c}` : c}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      <Card className="p-5">
+        <div className="mb-4 flex items-center gap-2">
+          <ShieldCheck className="h-4 w-4 text-brand-600" />
+          <h3 className="text-sm font-semibold text-gray-900">Features</h3>
+        </div>
+        <div className="space-y-4">
+          <ToggleRow label="Loyalty points" desc="Award points on sales and allow redemption at the POS."
+            checked={form.loyaltyEnabled === "true"} onChange={(v) => setForm((f) => ({ ...f, loyaltyEnabled: String(v) }))} />
+          <ToggleRow label="Buy on credit" desc="Let customers purchase on credit against their credit limit."
+            checked={form.creditEnabled === "true"} onChange={(v) => setForm((f) => ({ ...f, creditEnabled: String(v) }))} />
+          <ToggleRow label="Low-stock alerts" desc="Notify the owner when an item hits its reorder threshold."
+            checked={form.lowStockAlertEnabled === "true"} onChange={(v) => setForm((f) => ({ ...f, lowStockAlertEnabled: String(v) }))} />
+        </div>
+        <div className="mt-6 space-y-4 border-t border-gray-100 pt-4">
+          <p className="text-xs font-medium text-gray-600">Outbound messaging webhooks</p>
+          <Field label="SMS webhook URL" hint="POSTed { to, body } for SMS receipt/campaign delivery.">
+            <Input value={form.smsWebhookUrl} onChange={(e) => setForm((f) => ({ ...f, smsWebhookUrl: e.target.value }))} placeholder="https://provider.example.com/sms" />
+          </Field>
+          <Field label="WhatsApp webhook URL" hint="POSTed { to, body } for WhatsApp delivery.">
+            <Input value={form.whatsappWebhookUrl} onChange={(e) => setForm((f) => ({ ...f, whatsappWebhookUrl: e.target.value }))} placeholder="https://provider.example.com/whatsapp" />
+          </Field>
+          <p className="text-xs text-gray-400">Leave blank to log messages to the server console (development mode).</p>
+        </div>
+      </Card>
+
+      <div className="xl:col-span-2">
+        {error && <Alert kind="error" className="mb-4">{error}</Alert>}
+        {saved && <Alert kind="success" className="mb-4">Business settings saved.</Alert>}
+        <div className="flex justify-end">
+          <Button onClick={submit} loading={saving}>Save settings</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ToggleRow({ label, desc, checked, onChange }: { label: string; desc: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <div>
+        <p className="text-sm font-medium text-gray-800">{label}</p>
+        <p className="text-xs text-gray-400">{desc}</p>
+      </div>
+      <button
+        onClick={() => onChange(!checked)}
+        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${checked ? "bg-brand-600" : "bg-gray-200"}`}
+        aria-pressed={checked}
+      >
+        <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${checked ? "translate-x-5.5 left-0.5" : "translate-x-0.5 left-0"}`} style={{ transform: checked ? "translateX(22px)" : "translateX(2px)" }} />
+      </button>
     </div>
   );
 }
@@ -118,11 +275,22 @@ function MyAccount() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [verifyMsg, setVerifyMsg] = useState<string | null>(null);
 
   useEffect(() => {
     setName(user?.name ?? "");
     setPhone(user?.phone ?? "");
   }, [user]);
+
+  const resendVerification = async () => {
+    setVerifyMsg(null);
+    try {
+      await api("/auth/send-verification", { method: "POST", body: {} });
+      setVerifyMsg("Verification email sent. Check your inbox.");
+    } catch (err: any) {
+      setVerifyMsg(err?.message ?? "Could not send verification email");
+    }
+  };
 
   const submit = async () => {
     setError(null);
@@ -146,11 +314,18 @@ function MyAccount() {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <p className="text-xs text-gray-400">Email</p>
-              <p className="pt-1.5 text-sm text-gray-700">{user?.email}</p>
+              <div className="flex items-center gap-2 pt-1.5">
+                <p className="text-sm text-gray-700">{user?.email}</p>
+                {user?.emailVerified ? (
+                  <Badge tone="green" dot>Verified</Badge>
+                ) : (
+                  <Badge tone="amber" dot>Unverified</Badge>
+                )}
+              </div>
             </div>
             <div>
               <p className="text-xs text-gray-400">Role</p>
-              <div className="pt-1"><Badge tone={user?.role === "ADMIN" ? "violet" : user?.role === "BRANCH_MANAGER" ? "blue" : "gray"}>{ROLE_LABELS[user?.role as Role] ?? "—"}</Badge></div>
+              <div className="pt-1"><Badge tone={user?.role === "ADMIN" ? "violet" : user?.role === "AUDITOR" ? "amber" : user?.role === "BRANCH_MANAGER" ? "blue" : "gray"}>{ROLE_LABELS[user?.role as Role] ?? "—"}</Badge></div>
             </div>
           </div>
           <div>
@@ -165,6 +340,16 @@ function MyAccount() {
           <Field label="Phone">
             <Input value={phone ?? ""} onChange={(e) => setPhone(e.target.value)} />
           </Field>
+          {user && !user.emailVerified && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+              <p className="font-medium">Email not verified</p>
+              <p className="mt-0.5 text-xs text-amber-700">Verify your email to receive receipts, campaigns and system alerts.</p>
+              <Button size="sm" variant="outline" onClick={resendVerification} className="mt-2">
+                Resend verification email
+              </Button>
+              {verifyMsg && <p className="mt-2 text-xs">{verifyMsg}</p>}
+            </div>
+          )}
           {error && <Alert kind="error">{error}</Alert>}
           {saved && <Alert kind="success">Your changes were saved.</Alert>}
           <div className="flex justify-end">
@@ -281,6 +466,7 @@ function TeamTab() {
                 <option value="SALES_STAFF">Sales Staff</option>
                 <option value="BRANCH_MANAGER">Branch Manager</option>
                 <option value="ADMIN">Admin</option>
+                <option value="AUDITOR">Auditor (read-only)</option>
               </Select>
             </Field>
             <Field label="Branch">

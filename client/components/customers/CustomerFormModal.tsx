@@ -31,6 +31,7 @@ export function CustomerFormModal({
     segment: customer?.segment ?? "REGULAR",
     birthday: customer?.birthday ? customer.birthday.slice(0, 10) : "",
     preferredBranchId: customer?.preferredBranchId ?? "",
+    creditLimit: customer?.creditLimit ? String(customer.creditLimit) : "0",
   });
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
@@ -45,7 +46,7 @@ export function CustomerFormModal({
     setWarning(null);
     setSaving(true);
     try {
-      const payload = { ...form, preferredBranchId: form.preferredBranchId || null, birthday: form.birthday || null };
+      const payload = { ...form, preferredBranchId: form.preferredBranchId || null, birthday: form.birthday || null, creditLimit: Number(form.creditLimit) || 0 };
       if (customer) {
         await api(`/customers/${customer.id}`, { method: "PUT", body: payload });
       } else {
@@ -104,15 +105,18 @@ export function CustomerFormModal({
           <Field label="Birthday">
             <Input type="date" value={form.birthday} onChange={set("birthday")} />
           </Field>
-          <Field label="Preferred branch">
-            <Select value={form.preferredBranchId} onChange={set("preferredBranchId")}>
-              <option value="">Not set</option>
-              {branches.map((b) => (
-                <option key={b.id} value={b.id}>{b.name}</option>
-              ))}
-            </Select>
+          <Field label="Credit limit (₵)">
+            <Input type="number" min="0" step="0.01" value={form.creditLimit} onChange={set("creditLimit")} placeholder="0.00" />
           </Field>
         </div>
+        <Field label="Preferred branch">
+          <Select value={form.preferredBranchId} onChange={set("preferredBranchId")}>
+            <option value="">Not set</option>
+            {branches.map((b) => (
+              <option key={b.id} value={b.id}>{b.name}</option>
+            ))}
+          </Select>
+        </Field>
         <Field label="Address">
           <Input value={form.address} onChange={set("address")} />
         </Field>

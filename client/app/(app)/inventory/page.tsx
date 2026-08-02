@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Plus, ArrowLeftRight, PackagePlus, AlertTriangle, Check, X, Truck } from "lucide-react";
+import { Plus, ArrowLeftRight, PackagePlus, AlertTriangle, Check, X, Truck, Upload } from "lucide-react";
 import { useApp } from "@/context/AppContext";
 import { api } from "@/lib/api";
 import { cn, formatDateTime, formatMoney, formatNumber } from "@/lib/utils";
@@ -45,6 +45,11 @@ function StockTab() {
   const [adjustProduct, setAdjustProduct] = useState<Product | null>(null);
   const [adjustQty, setAdjustQty] = useState(0);
   const [productModal, setProductModal] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importCsv, setImportCsv] = useState("");
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importResult, setImportResult] = useState<{ created: number; skipped: string[]; errors: number } | null>(null);
+  const [importing, setImporting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -77,6 +82,22 @@ function StockTab() {
     await api("/inventory/stock/adjust", { method: "POST", body: { branchId, productId: adjustProduct!.id, quantity: adjustQty } });
     setAdjustOpen(false);
     load();
+  };
+
+  const doImport = async () => {
+    setImportError(null);
+    setImportResult(null);
+    if (!importCsv.trim()) return setImportError("Paste your CSV below.");
+    setImporting(true);
+    try {
+      const res = await api<{ created: number; skipped: string[]; errors: number }>("/inventory/products/import", { method: "POST", body: { csv: importCsv } });
+      setImportResult(res);
+      load();
+    } catch (err: any) {
+      setImportError(err?.message ?? "Import failed");
+    } finally {
+      setImporting(false);
+    }
   };
 
   return (
@@ -124,9 +145,14 @@ function StockTab() {
           ))}
         </select>
         {isManager && (
-          <Button variant="outline" onClick={() => setProductModal(true)} className="ml-auto">
-            <PackagePlus className="h-4 w-4" /> New product
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => { setImportOpen(true); setImportCsv(""); setImportError(null); setImportResult(null); }}>
+              <Upload className="h-4 w-4" /> Import CSV
+            </Button>
+            <Button variant="outline" onClick={() => setProductModal(true)}>
+              <PackagePlus className="h-4 w-4" /> New product
+            </Button>
+          </div>
         )}
       </div>
 
@@ -194,6 +220,32 @@ function StockTab() {
       </Modal>
 
       <ProductModal open={productModal} onClose={() => setProductModal(false)} onSaved={load} />
+
+      <Modal open={importOpen} onClose={() => setImportOpen(false)} title="Import products from CSV" wide
+        footer={<><Button variant="outline" onClick={() => setImportOpen(false)}>Cancel</Button><Button onClick={doImport} loading={importing}>Import</Button></>}>
+        {importError && <Alert kind="error" className="mb-4">{importError}</Alert>}
+        {importResult && (
+          <Alert kind="success" className="mb-4">
+            Created <b>{importResult.created}</b> product{importResult.created === 1 ? "" : "s"}
+            {importResult.skipped.length > 0 && <> · skipped {importResult.skipped.length} duplicate SKUs</>}
+            {importResult.errors > 0 && <> · {importResult.errors} rows with errors</>}.
+          </Alert>
+        )}
+        <div className="space-y-4">
+          <p className="text-xs text-gray-500">Paste CSV data. Columns: <code className="rounded bg-gray-100 px-1">name, sku, price, cost, category, lowStockThreshold, branchCode, quantity</code></p>
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs text-gray-500">
+            <p className="mb-1 font-medium text-gray-600">Template</p>
+            <pre className="overflow-x-auto whitespace-pre">{'name,sku,price,cost,category,lowStockThreshold,branchCode,quantity\nSamsung Charger,CHR-S22,45,30,Accessories,5,ACC,20\nUSB Cable,USB-C,25,12,Accessories,10,ACC,50'}</pre>
+          </div>
+          <textarea
+            value={importCsv}
+            onChange={(e) => setImportCsv(e.target.value)}
+            rows={8}
+            placeholder="Paste your CSV here..."
+            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 font-mono text-xs text-gray-900 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"
+          />
+        </div>
+      </Modal>
     </div>
   );
 }

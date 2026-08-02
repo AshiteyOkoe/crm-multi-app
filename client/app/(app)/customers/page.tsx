@@ -7,6 +7,7 @@ import { useApp } from "@/context/AppContext";
 import { api } from "@/lib/api";
 import { useDebounced } from "@/lib/hooks";
 import { formatMoney, formatNumber } from "@/lib/utils";
+import { TIER_LABELS, TIER_TONES } from "@/lib/loyalty";
 import type { Customer, Paginated } from "@/types";
 import { PageHeader, SearchInput } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
@@ -108,6 +109,7 @@ export default function CustomersPage() {
                   <th className="px-4 py-3 font-medium">Customer</th>
                   <th className="px-4 py-3 font-medium">Contact</th>
                   <th className="px-4 py-3 font-medium">Segment</th>
+                  <th className="px-4 py-3 font-medium">Loyalty</th>
                   <th className="px-4 py-3 font-medium">Branch</th>
                   <th className="px-4 py-3 text-right font-medium">Lifetime value</th>
                   <th className="px-4 py-3 text-right font-medium">Purchases</th>
@@ -127,6 +129,12 @@ export default function CustomersPage() {
                     </td>
                     <td className="px-4 py-3">
                       <Badge tone={SEGMENT_TONES[c.segment] ?? "gray"}>{c.segment}</Badge>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <Badge tone={TIER_TONES[c.tier ?? "BRONZE"]}>{TIER_LABELS[c.tier ?? "BRONZE"]}</Badge>
+                        {(c.points ?? 0) > 0 && <span className="text-xs text-gray-500">{formatNumber(c.points ?? 0)} pts</span>}
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-gray-600">{c.preferredBranch?.name ?? "—"}</td>
                     <td className="px-4 py-3 text-right font-semibold text-gray-900">{formatMoney(c.lifetimeValue ?? 0)}</td>

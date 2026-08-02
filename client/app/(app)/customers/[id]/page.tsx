@@ -3,14 +3,19 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ArrowLeft, Pencil, Phone, Mail, Building2, MapPin, StickyNote, Calendar } from "lucide-react";
+import { ArrowLeft, Pencil, Phone, Mail, Building2, MapPin, StickyNote, Calendar, Award, Wallet } from "lucide-react";
 import { api } from "@/lib/api";
-import { formatMoney, formatDate, formatDateTime, initials } from "@/lib/utils";
-import type { Customer, Interaction, Sale } from "@/types";
+import { formatMoney, formatDate, formatDateTime, formatNumber, initials, cn } from "@/lib/utils";
+import { TIER_LABELS, TIER_TONES } from "@/lib/loyalty";
+import type { Customer, CustomerPayment, Interaction, Sale } from "@/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Spinner } from "@/components/ui/Spinner";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { Button } from "@/components/ui/Button";
+import { Modal } from "@/components/ui/Modal";
+import { Input, Field } from "@/components/ui/Input";
+import { Alert } from "@/components/ui/Alert";
 import { CustomerFormModal } from "@/components/customers/CustomerFormModal";
 
 interface CustomerDetail extends Customer {
@@ -30,12 +35,20 @@ export default function CustomerDetailPage() {
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [note, setNote] = useState("");
+  const [payments, setPayments] = useState<CustomerPayment[]>([]);
+  const [payModalOpen, setPayModalOpen] = useState(false);
+  const [payAmount, setPayAmount] = useState("");
+  const [payNote, setPayNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [payError, setPayError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const res = await api<CustomerDetail>(`/customers/${params.id}`);
       setCustomer(res);
+      const p = await api<{ items: CustomerPayment[] }>(`/customers/${params.id}/payments`, { params: { pageSize: 25 } });
+      setPayments(p.items);
     } finally {
       setLoading(false);
     }
@@ -44,6 +57,24 @@ export default function CustomerDetailPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const recordPayment = async () => {
+    setPayError(null);
+    const amount = Number(payAmount);
+    if (!amount || amount <= 0) return setPayError("Enter a valid amount.");
+    setSaving(true);
+    try {
+      await api(`/customers/${customer!.id}/payments`, { method: "POST", body: { amount, note: payNote || undefined } });
+      setPayModalOpen(false);
+      setPayAmount("");
+      setPayNote("");
+      load();
+    } catch (err: any) {
+      setPayError(err?.message ?? "Could not record payment");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const addNote = async () => {
     if (!note.trim()) return;
@@ -89,7 +120,7 @@ export default function CustomerDetailPage() {
               </div>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4 text-right">
+          <div className="grid grid-cols-2 gap-4 text-right md:grid-cols-4">
             <div>
               <p className="text-xs font-medium uppercase tracking-wide text-gray-400">Lifetime value</p>
               <p className="text-xl font-bold text-gray-900">{formatMoney(customer.lifetimeValue ?? 0)}</p>
@@ -98,9 +129,63 @@ export default function CustomerDetailPage() {
               <p className="text-xs font-medium uppercase tracking-wide text-gray-400">Purchases</p>
               <p className="text-xl font-bold text-gray-900">{customer.sales?.length ?? 0}</p>
             </div>
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-gray-400">Loyalty points</p>
+              <p className="text-xl font-bold text-brand-600">{formatNumber(customer.points ?? 0)}</p>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-gray-400">Loyalty tier</p>
+              <Badge tone={TIER_TONES[customer.tier ?? "BRONZE"]} className="mt-1.5">{TIER_LABELS[customer.tier ?? "BRONZE"]}</Badge>
+            </div>
           </div>
         </CardContent>
       </Card>
+
+      {(customer.creditLimit ?? 0) > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2"><Wallet className="h-4 w-4 text-brand-600" /> Credit account</CardTitle>
+            <Button size="sm" onClick={() => setPayModalOpen(true)} disabled={(customer.creditBalance ?? 0) <= 0}>
+              <Wallet className="h-3.5 w-3.5" /> Record payment
+            </Button>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="grid grid-cols-2 gap-4 border-b border-gray-100 px-5 py-4 sm:grid-cols-4">
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-gray-400">Credit limit</p>
+                <p className="text-lg font-bold text-gray-900">{formatMoney(customer.creditLimit ?? 0)}</p>
+              </div>
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-gray-400">Outstanding</p>
+                <p className={cn("text-lg font-bold", (customer.creditBalance ?? 0) > 0 ? "text-red-600" : "text-gray-900")}>{formatMoney(customer.creditBalance ?? 0)}</p>
+              </div>
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-gray-400">Available</p>
+                <p className="text-lg font-bold text-emerald-600">{formatMoney((customer.creditLimit ?? 0) - (customer.creditBalance ?? 0))}</p>
+              </div>
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-gray-400">Usage</p>
+                <p className="text-lg font-bold text-gray-900">
+                  {customer.creditLimit ? Math.round(((customer.creditBalance ?? 0) / customer.creditLimit) * 100) : 0}%
+                </p>
+              </div>
+            </div>
+            {payments.length > 0 && (
+              <ul className="divide-y divide-gray-50">
+                {payments.map((p) => (
+                  <li key={p.id} className="flex items-center justify-between px-5 py-3">
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">{formatMoney(p.amount)}</p>
+                      <p className="text-xs text-gray-500">{formatDateTime(p.createdAt)} · {p.branch?.name} · {p.method}</p>
+                    </div>
+                    {p.note && <p className="text-xs text-gray-400">{p.note}</p>}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {customer.notes && (
         <Card>
@@ -167,6 +252,20 @@ export default function CustomerDetailPage() {
       </div>
 
       <CustomerFormModal open={modalOpen} onClose={() => setModalOpen(false)} onSaved={load} customer={customer} />
+
+      <Modal open={payModalOpen} onClose={() => setPayModalOpen(false)} title="Record credit payment"
+        footer={<><Button variant="outline" onClick={() => setPayModalOpen(false)}>Cancel</Button><Button onClick={recordPayment} loading={saving}>Record payment</Button></>}>
+        <div className="space-y-4">
+          {payError && <Alert kind="error">{payError}</Alert>}
+          <Field label="Amount" required>
+            <Input type="number" min="0" step="0.01" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} placeholder="0.00" />
+          </Field>
+          <Field label="Note" hint="Optional reference, e.g. bank transfer ref">
+            <Input value={payNote} onChange={(e) => setPayNote(e.target.value)} placeholder="e.g. MoMo payment 10 Aug" />
+          </Field>
+          <p className="text-xs text-gray-400">Outstanding balance: {formatMoney(customer.creditBalance ?? 0)}. This payment reduces the customer's outstanding balance.</p>
+        </div>
+      </Modal>
     </div>
   );
 }

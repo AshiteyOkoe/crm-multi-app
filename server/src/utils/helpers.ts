@@ -51,15 +51,15 @@ export function getPagination(query: any, defaults = { page: 1, pageSize: 20 }) 
 }
 
 // RBAC: returns the list of branch ids a user may access.
-// Admin => null means all branches. Manager/Staff => their own branch only.
+// Admin/Auditor => null means all branches. Manager/Staff => their own branch only.
 export function accessibleBranches(user: { role: Role; branchId?: string | null }) {
-  if (user.role === 'ADMIN') return null;
+  if (user.role === 'ADMIN' || user.role === 'AUDITOR') return null;
   if (!user.branchId) throw forbidden('No branch assigned to this account');
   return [user.branchId];
 }
 
 export function assertBranchAllowed(user: { role: Role; branchId?: string | null }, branchId?: string | null) {
-  if (user.role === 'ADMIN') return;
+  if (user.role === 'ADMIN' || user.role === 'AUDITOR') return;
   if (!branchId) throw forbidden('A branch is required for this action');
   if (branchId !== user.branchId) throw forbidden('You do not have access to this branch');
 }

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { createSale, listSales, getSale, voidSale, createReturn, todaySummary } from '../controllers/sale.controller';
+import { createSale, listSales, getSale, voidSale, createReturn, todaySummary, deliverReceipt } from '../controllers/sale.controller';
 import { authenticate, authorize } from '../middleware/auth';
 
 const router = Router();
@@ -8,6 +8,7 @@ router.get('/', authenticate, listSales);
 router.get('/today-summary', authenticate, todaySummary);
 router.post('/', authenticate, createSale);
 router.post('/returns', authenticate, createReturn);
+router.post('/:id/deliver-receipt', authenticate, deliverReceipt);
 router.get('/:id', authenticate, getSale);
 router.post('/:id/void', authenticate, authorize('BRANCH_MANAGER', 'ADMIN'), voidSale);
 

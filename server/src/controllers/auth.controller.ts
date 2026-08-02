@@ -1,9 +1,11 @@
 import bcrypt from 'bcryptjs';
+import crypto from 'node:crypto';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { signToken, type AuthRequest } from '../middleware/auth';
-import { ok, created, badRequest, unauthorized, asyncHandler } from '../utils/helpers';
+import { ok, created, badRequest, unauthorized, asyncHandler, notFound } from '../utils/helpers';
 import { writeAuditLog } from '../utils/audit';
+import { sendMessage } from '../utils/mailer';
 import { env } from '../config/env';
 
 const registerSchema = z.object({
@@ -11,7 +13,7 @@ const registerSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8).max(100),
   phone: z.string().optional(),
-  role: z.enum(['ADMIN', 'BRANCH_MANAGER', 'SALES_STAFF']).optional(),
+  role: z.enum(['ADMIN', 'BRANCH_MANAGER', 'SALES_STAFF', 'AUDITOR']).optional(),
   branchId: z.string().optional(),
 });
 
@@ -108,5 +110,67 @@ export const me = asyncHandler(async (req: AuthRequest, res) => {
     branchId: user.branchId,
     branch: user.branch,
     createdAt: user.createdAt,
+    emailVerified: user.emailVerified,
   });
+});
+
+// ======================= EMAIL VERIFICATION =======================
+
+export const sendVerificationEmail = asyncHandler(async (req: AuthRequest, res) => {
+  const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
+  if (!user) throw unauthorized();
+  if (user.emailVerified) return ok(res, { message: 'Email is already verified' });
+
+  const verifyToken = crypto.randomBytes(24).toString('hex');
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { verifyToken, verifyTokenExpires: new Date(Date.now() + 24 * 3600 * 1000) },
+  });
+
+  const link = `${env.clientUrl}/verify-email?token=${verifyToken}`;
+  await sendMessage({ to: user.email, channel: 'EMAIL', subject: 'Verify your email', body: `Hi ${user.name},\n\nPlease verify your email address:\n${link}\n\nThis link expires in 24 hours.` });
+  await writeAuditLog({ userId: user.id, userEmail: user.email, action: 'VERIFICATION_EMAIL_SENT' });
+  return ok(res, { message: env.nodeEnv === 'production' ? 'Verification email sent' : `Verification link (dev): ${link}` });
+});
+
+export const verifyEmail = asyncHandler(async (req, res) => {
+  const token = String(req.query.token ?? req.body?.token ?? '');
+  if (!token) badRequest('Verification token is required');
+  const user = await prisma.user.findFirst({ where: { verifyToken: token, verifyTokenExpires: { gt: new Date() } } });
+  if (!user) badRequest('Invalid or expired verification token');
+  await prisma.user.update({ where: { id: user.id }, data: { emailVerified: true, verifyToken: null, verifyTokenExpires: null } });
+  await writeAuditLog({ userId: user.id, userEmail: user.email, action: 'EMAIL_VERIFIED' });
+  return ok(res, { verified: true, email: user.email });
+});
+
+// ======================= PASSWORD RESET =======================
+
+export const forgotPassword = asyncHandler(async (req, res) => {
+  const schema = z.object({ email: z.string().email() });
+  const data = schema.parse(req.body);
+  const user = await prisma.user.findUnique({ where: { email: data.email.toLowerCase() } });
+  if (!user) return ok(res, { message: 'If an account with that email exists, a reset link has been sent.' });
+
+  const resetToken = crypto.randomBytes(24).toString('hex');
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { resetToken, resetTokenExpires: new Date(Date.now() + 2 * 3600 * 1000) },
+  });
+
+  const link = `${env.clientUrl}/reset-password?token=${resetToken}`;
+  await sendMessage({ to: user.email, channel: 'EMAIL', subject: 'Reset your password', body: `Hi ${user.name},\n\nReset your password here (expires in 2 hours):\n${link}\n\nIf you did not request this, you can safely ignore this email.` });
+  await writeAuditLog({ userId: user.id, userEmail: user.email, action: 'PASSWORD_RESET_REQUESTED' });
+  return ok(res, { message: env.nodeEnv === 'production' ? 'If an account with that email exists, a reset link has been sent.' : `Reset link (dev): ${link}` });
+});
+
+export const resetPassword = asyncHandler(async (req, res) => {
+  const schema = z.object({ token: z.string().min(1), password: z.string().min(8).max(100) });
+  const data = schema.parse(req.body);
+  const user = await prisma.user.findFirst({ where: { resetToken: data.token, resetTokenExpires: { gt: new Date() } } });
+  if (!user) badRequest('Invalid or expired reset token');
+
+  const passwordHash = await bcrypt.hash(data.password, env.bcryptSaltRounds);
+  await prisma.user.update({ where: { id: user.id }, data: { passwordHash, resetToken: null, resetTokenExpires: null } });
+  await writeAuditLog({ userId: user.id, userEmail: user.email, action: 'PASSWORD_RESET' });
+  return ok(res, { reset: true });
 });

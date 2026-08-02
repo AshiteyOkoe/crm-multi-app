@@ -21,6 +21,15 @@ const STAGE_TONES: Record<LeadStatus, "gray" | "blue" | "violet" | "amber" | "cy
   NEW: "gray", CONTACTED: "blue", QUALIFIED: "violet", PROPOSAL_SENT: "amber", NEGOTIATION: "cyan", WON: "green", LOST: "red",
 };
 
+const SCORE_TONES: Record<string, "red" | "amber" | "gray" | "green"> = {
+  HOT: "red", WARM: "amber", COLD: "gray",
+};
+
+function ScoreBadge({ score, label }: { score: number; label: string }) {
+  if (!label) return null;
+  return <Badge tone={SCORE_TONES[label] ?? "gray"}>{label} · {score}</Badge>;
+}
+
 export default function LeadsPage() {
   const [view, setView] = useState<"pipeline" | "list">("pipeline");
   const [items, setItems] = useState<Lead[]>([]);
@@ -35,6 +44,7 @@ export default function LeadsPage() {
   const [editing, setEditing] = useState<Lead | null>(null);
   const [defaultStatus, setDefaultStatus] = useState<LeadStatus>("NEW");
   const [dragId, setDragId] = useState<string | null>(null);
+  const [scoreMap, setScoreMap] = useState<Record<string, { score: number; scoreLabel: string }>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -45,6 +55,8 @@ export default function LeadsPage() {
       setItems(res.items);
       setTotal(res.total);
       setPages(res.pages);
+      const scored = await api<{ items: { id: string; score: number; scoreLabel: string }[] }>("/intelligence/lead-scores", { params: { pageSize: 500 } });
+      setScoreMap(Object.fromEntries(scored.items.map((s) => [s.id, { score: s.score, scoreLabel: s.scoreLabel }])));
     } finally {
       setLoading(false);
     }
@@ -159,7 +171,10 @@ export default function LeadsPage() {
                         <p className="mt-0.5 text-xs text-gray-500">{lead.company ?? lead.email ?? lead.phone ?? "—"}</p>
                         <div className="mt-2 flex items-center justify-between">
                           <span className="text-sm font-bold text-brand-600">{formatMoney(lead.value)}</span>
-                          {lead.assignedTo && <span className="text-[10px] text-gray-400">{lead.assignedTo.name}</span>}
+                          <span className="flex items-center gap-1.5">
+                            {scoreMap[lead.id] && <ScoreBadge score={scoreMap[lead.id].score} label={scoreMap[lead.id].scoreLabel} />}
+                            {lead.assignedTo && <span className="text-[10px] text-gray-400">{lead.assignedTo.name}</span>}
+                          </span>
                         </div>
                       </Link>
                       <div className="mt-2 flex items-center gap-1 border-t border-gray-50 pt-2">
@@ -211,6 +226,7 @@ export default function LeadsPage() {
                   <th className="px-4 py-3 font-medium">Lead</th>
                   <th className="px-4 py-3 font-medium">Contact</th>
                   <th className="px-4 py-3 font-medium">Status</th>
+                  <th className="px-4 py-3 font-medium">Score</th>
                   <th className="px-4 py-3 font-medium">Assigned</th>
                   <th className="px-4 py-3 text-right font-medium">Value</th>
                   <th className="px-4 py-3" />
@@ -229,6 +245,9 @@ export default function LeadsPage() {
                     </td>
                     <td className="px-4 py-3">
                       <Badge tone={STAGE_TONES[lead.status]}>{STAGE_LABELS[lead.status]}</Badge>
+                    </td>
+                    <td className="px-4 py-3">
+                      {scoreMap[lead.id] ? <ScoreBadge score={scoreMap[lead.id].score} label={scoreMap[lead.id].scoreLabel} /> : <span className="text-xs text-gray-400">—</span>}
                     </td>
                     <td className="px-4 py-3 text-gray-600">{lead.assignedTo?.name ?? "—"}</td>
                     <td className="px-4 py-3 text-right font-semibold text-gray-900">{formatMoney(lead.value)}</td>

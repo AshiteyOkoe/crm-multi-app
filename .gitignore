@@ -25,6 +25,9 @@ server/.pgdata/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+client-log.txt
+server-log.txt
+db-log.txt
 
 # misc
 .DS_Store

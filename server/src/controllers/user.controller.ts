@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { asyncHandler, ok, created, notFound, badRequest, forbidden, getPagination } from '../utils/helpers';
 import { writeAuditLog } from '../utils/audit';
+import { invalidateSettingsCache } from '../utils/settings';
 import { env } from '../config/env';
 import type { AuthRequest } from '../middleware/auth';
 
@@ -59,7 +60,7 @@ export const createUser = asyncHandler(async (req: AuthRequest, res) => {
     email: z.string().email(),
     password: z.string().min(8),
     phone: z.string().optional(),
-    role: z.enum(['ADMIN', 'BRANCH_MANAGER', 'SALES_STAFF']),
+    role: z.enum(['ADMIN', 'BRANCH_MANAGER', 'SALES_STAFF', 'AUDITOR']),
     branchId: z.string().optional(),
   });
   const data = schema.parse(req.body);
@@ -67,7 +68,7 @@ export const createUser = asyncHandler(async (req: AuthRequest, res) => {
   const existing = await prisma.user.findUnique({ where: { email: data.email.toLowerCase() } });
   if (existing) badRequest('An account with this email already exists');
 
-  if (data.role !== 'ADMIN' && !data.branchId) badRequest('A branch is required for manager and staff accounts');
+  if (data.role !== 'ADMIN' && data.role !== 'AUDITOR' && !data.branchId) badRequest('A branch is required for manager and staff accounts');
 
   const passwordHash = await bcrypt.hash(data.password, env.bcryptSaltRounds);
   const user = await prisma.user.create({
@@ -81,7 +82,7 @@ export const updateUser = asyncHandler(async (req: AuthRequest, res) => {
   const schema = z.object({
     name: z.string().min(2).optional(),
     phone: z.string().optional(),
-    role: z.enum(['ADMIN', 'BRANCH_MANAGER', 'SALES_STAFF']).optional(),
+    role: z.enum(['ADMIN', 'BRANCH_MANAGER', 'SALES_STAFF', 'AUDITOR']).optional(),
     branchId: z.string().nullable().optional(),
     isActive: z.boolean().optional(),
     password: z.string().min(8).optional(),
@@ -197,14 +198,21 @@ export const updateSettings = asyncHandler(async (req: AuthRequest, res) => {
   const schema = z.object({
     businessName: z.string().optional(),
     currency: z.string().max(10).optional(),
+    taxRate: z.number().min(0).max(100).optional(),
     lowStockAlertEnabled: z.string().optional(),
     receiptFooter: z.string().optional(),
+    receiptChannels: z.string().optional(),
+    loyaltyEnabled: z.string().optional(),
+    creditEnabled: z.string().optional(),
+    smsWebhookUrl: z.string().optional(),
+    whatsappWebhookUrl: z.string().optional(),
   });
   const data = schema.parse(req.body);
   const entries = Object.entries(data);
   for (const [key, value] of entries) {
     await prisma.appSetting.upsert({ where: { key }, update: { value: String(value) }, create: { key, value: String(value) } });
   }
+  invalidateSettingsCache();
   await writeAuditLog({ userId: req.user!.id, userEmail: req.user!.email, action: 'SETTINGS_UPDATED', details: data });
   return ok(res, { updated: true });
 });

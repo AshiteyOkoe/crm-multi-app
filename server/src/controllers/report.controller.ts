@@ -329,6 +329,245 @@ export const getCustomerGrowthReport = asyncHandler(async (req: AuthRequest, res
   });
 });
 
+// ======================= PROFIT & LOSS =======================
+
+export const getPnlReport = asyncHandler(async (req: AuthRequest, res) => {
+  const { where } = resolveScopeAndBranch(req);
+  const { start, end } = paramRange(req);
+  const sales = await prisma.sale.findMany({
+    where: { ...where, status: 'COMPLETED', createdAt: { gte: start, lte: end } },
+    include: {
+      items: { include: { product: { select: { cost: true } } } },
+      branch: { select: { id: true, name: true, code: true } },
+      returns: { select: { amount: true, status: true } },
+    },
+    orderBy: { createdAt: 'asc' },
+  });
+
+  const expenses = await prisma.expense.findMany({
+    where: { ...where, expenseDate: { gte: start, lte: end } },
+    include: { branch: { select: { id: true, name: true, code: true } } },
+    orderBy: { expenseDate: 'asc' },
+  });
+
+  const totalRevenue = sales.reduce((s, x) => s + x.total, 0);
+  const totalCogs = sales.reduce((s, x) => s + x.items.reduce((si, it) => si + (it.product?.cost ?? it.unitPrice) * it.quantity, 0), 0);
+  const totalDiscount = sales.reduce((s, x) => s + x.discount, 0);
+  const totalTax = sales.reduce((s, x) => s + x.tax, 0);
+  const totalPointsDiscount = sales.reduce((s, x) => s + (x.pointsDiscount ?? 0), 0);
+  const pendingReturns = sales.reduce((s, x) => s + x.returns.reduce((a, r) => a + r.amount, 0), 0);
+  const totalExpenses = expenses.reduce((s, x) => s + x.amount, 0);
+  const grossProfit = totalRevenue - totalCogs;
+  const netProfit = grossProfit - pendingReturns - totalExpenses;
+  const profitMargin = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
+  const netMargin = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
+
+  const expenseByCategory = new Map<string, { category: string; amount: number; count: number }>();
+  for (const e of expenses) {
+    const c = expenseByCategory.get(e.category) ?? { category: e.category, amount: 0, count: 0 };
+    c.amount += e.amount;
+    c.count += 1;
+    expenseByCategory.set(e.category, c);
+  }
+
+  const byBranch = new Map<string, { id: string; name: string; revenue: number; cost: number; expenses: number; profit: number; count: number }>();
+  for (const s of sales) {
+    const b = byBranch.get(s.branchId) ?? { id: s.branchId, name: `${s.branch?.code ?? ''} — ${s.branch?.name ?? ''}`, revenue: 0, cost: 0, expenses: 0, profit: 0, count: 0 };
+    const cost = s.items.reduce((si, it) => si + (it.product?.cost ?? it.unitPrice) * it.quantity, 0);
+    b.revenue += s.total;
+    b.cost += cost;
+    b.profit += s.total - cost;
+    b.count += 1;
+    byBranch.set(s.branchId, b);
+  }
+  for (const e of expenses) {
+    const b = byBranch.get(e.branchId) ?? { id: e.branchId, name: `${e.branch?.code ?? ''} — ${e.branch?.name ?? ''}`, revenue: 0, cost: 0, expenses: 0, profit: 0, count: 0 };
+    b.expenses += e.amount;
+    b.profit -= e.amount;
+    byBranch.set(e.branchId, b);
+  }
+
+  return ok(res, {
+    period: { start, end, label: req.query.period ?? 'month' },
+    summary: {
+      totalRevenue,
+      totalCogs,
+      grossProfit,
+      netProfit,
+      profitMargin,
+      netMargin,
+      totalDiscount,
+      totalTax,
+      totalPointsDiscount,
+      pendingReturns,
+      totalExpenses,
+      transactions: sales.length,
+      expenseTransactions: expenses.length,
+    },
+    expensesByCategory: Array.from(expenseByCategory.values()).sort((a, b) => b.amount - a.amount),
+    byBranch: Array.from(byBranch.values()).sort((a, b) => b.revenue - a.revenue),
+  });
+});
+
+// ======================= STOCK VALUATION =======================
+
+export const getStockValuation = asyncHandler(async (req: AuthRequest, res) => {
+  const branchId = req.query.branchId as string | undefined;
+  if (branchId) assertBranchAllowed(req.user!, branchId);
+
+  const where: any = { ...branchScope(req.user!), product: { isActive: true } };
+  if (branchId) where.branchId = branchId;
+
+  const stock = await prisma.branchProduct.findMany({
+    where,
+    include: { product: true, branch: { select: { id: true, name: true, code: true } } },
+    orderBy: [{ branch: { code: 'asc' } }, { product: { name: 'asc' } }],
+  });
+
+  const byBranch = new Map<string, { id: string; name: string; skuCount: number; units: number; valueAtCost: number; valueAtPrice: number }>();
+  for (const s of stock) {
+    const b = byBranch.get(s.branchId) ?? { id: s.branchId, name: `${s.branch?.code ?? ''} — ${s.branch?.name ?? ''}`, skuCount: 0, units: 0, valueAtCost: 0, valueAtPrice: 0 };
+    b.skuCount += 1;
+    b.units += s.quantity;
+    b.valueAtCost += s.quantity * s.product.cost;
+    b.valueAtPrice += s.quantity * s.product.price;
+    byBranch.set(s.branchId, b);
+  }
+
+  const products = stock.map((s) => ({
+    productId: s.productId,
+    branchId: s.branchId,
+    branchName: `${s.branch?.code ?? ''} — ${s.branch?.name ?? ''}`,
+    name: s.product.name,
+    sku: s.product.sku,
+    category: s.product.category,
+    cost: s.product.cost,
+    price: s.product.price,
+    quantity: s.quantity,
+    valueAtCost: s.quantity * s.product.cost,
+    valueAtPrice: s.quantity * s.product.price,
+  }));
+
+  const totalUnits = stock.reduce((s, x) => s + x.quantity, 0);
+  const totalValueAtCost = stock.reduce((s, x) => s + x.quantity * x.product.cost, 0);
+  const totalValueAtPrice = stock.reduce((s, x) => s + x.quantity * x.product.price, 0);
+
+  return ok(res, {
+    summary: { totalSku: stock.length, totalUnits, totalValueAtCost, totalValueAtPrice, potentialMargin: totalValueAtPrice - totalValueAtCost },
+    byBranch: Array.from(byBranch.values()).sort((a, b) => b.valueAtCost - a.valueAtCost),
+    products,
+  });
+});
+
+// ======================= PURCHASE SUGGESTIONS =======================
+
+export const getPurchaseSuggestions = asyncHandler(async (req: AuthRequest, res) => {
+  const branchId = req.query.branchId as string | undefined;
+  if (branchId) assertBranchAllowed(req.user!, branchId);
+
+  const scope = branchScope(req.user!);
+  const where: any = { ...scope, product: { isActive: true } };
+  if (branchId) where.branchId = branchId;
+
+  const stock = await prisma.branchProduct.findMany({
+    where,
+    include: { product: true, branch: { select: { id: true, name: true, code: true } } },
+    orderBy: [{ branch: { code: 'asc' } }, { product: { name: 'asc' } }],
+  });
+
+  // Units sold per product in the last 30 days (for velocity-based reorder)
+  const since = new Date();
+  since.setDate(since.getDate() - 30);
+  const velocityRows = await prisma.saleItem.groupBy({
+    by: ['productId'],
+    where: {
+      sale: {
+        status: 'COMPLETED',
+        createdAt: { gte: since },
+        ...(branchId ? { branchId } : scope),
+      },
+    },
+    _sum: { quantity: true },
+  });
+  const velocity = new Map(velocityRows.map((v) => [v.productId, v._sum.quantity ?? 0]));
+
+  const suggestions = stock
+    .filter((s) => s.quantity <= s.product.lowStockThreshold)
+    .map((s) => {
+      const sold30 = velocity.get(s.productId) ?? 0;
+      const dailyRate = sold30 / 30;
+      const coverDays = dailyRate > 0 ? Math.round(s.quantity / dailyRate) : null;
+      const target = Math.max(s.product.lowStockThreshold * 2, 1);
+      return {
+        productId: s.productId,
+        name: s.product.name,
+        sku: s.product.sku,
+        category: s.product.category,
+        cost: s.product.cost,
+        branchId: s.branchId,
+        branchName: `${s.branch?.code ?? ''} — ${s.branch?.name ?? ''}`,
+        currentQty: s.quantity,
+        lowStockThreshold: s.product.lowStockThreshold,
+        suggestedQty: Math.max(target - s.quantity, 1),
+        soldLast30: sold30,
+        dailyRate,
+        coverDays,
+        status: s.quantity <= 0 ? 'OUT_OF_STOCK' : 'LOW',
+      };
+    })
+    .sort((a, b) => (b.branchName.localeCompare(a.branchName)) || (a.currentQty === b.currentQty ? a.name.localeCompare(b.name) : a.currentQty - b.currentQty));
+
+  return ok(res, { suggestions });
+});
+
+// ======================= RECONCILIATION =======================
+
+// Per-branch payment method totals (cash/card/mobile money/credit) for a day or range.
+export const getReconciliation = asyncHandler(async (req: AuthRequest, res) => {
+  const branchId = req.query.branchId as string | undefined;
+  const from = (req.query.from as string) || todayRange(0).start.toISOString();
+  const to = (req.query.to as string) || todayRange(0).end.toISOString();
+
+  const where: any = { ...branchScope(req.user!), status: 'COMPLETED', createdAt: { gte: new Date(from), lte: new Date(to) } };
+  if (branchId) {
+    assertBranchAllowed(req.user!, branchId);
+    where.branchId = branchId;
+  }
+
+  const grouped = await prisma.sale.groupBy({
+    by: ['branchId', 'paymentMethod'],
+    where,
+    _sum: { total: true, amountPaid: true, creditUsed: true },
+    _count: true,
+  });
+
+  const branches = await prisma.branch.findMany({ select: { id: true, name: true, code: true } });
+  const branchMap = new Map(branches.map((b) => [b.id, b]));
+
+  const rows = grouped.map((g) => ({
+    branchId: g.branchId,
+    branch: branchMap.get(g.branchId) ? { id: g.branchId, name: branchMap.get(g.branchId)!.name, code: branchMap.get(g.branchId)!.code } : null,
+    method: g.paymentMethod,
+    total: g._sum.total ?? 0,
+    amountPaid: g._sum.amountPaid ?? 0,
+    creditUsed: g._sum.creditUsed ?? 0,
+    count: g._count,
+  }));
+
+  const totals = grouped.reduce(
+    (acc, g) => {
+      acc.total += g._sum.total ?? 0;
+      acc.amountPaid += g._sum.amountPaid ?? 0;
+      acc.creditUsed += g._sum.creditUsed ?? 0;
+      acc.count += g._count;
+      return acc;
+    },
+    { total: 0, amountPaid: 0, creditUsed: 0, count: 0 }
+  );
+
+  return ok(res, { period: { from, to }, rows, totals });
+});
+
 export const exportReportCsv = asyncHandler(async (req: AuthRequest, res) => {
   const report = req.params.type; // sales | leads | customers | staff
   const { where } = resolveScopeAndBranch(req);

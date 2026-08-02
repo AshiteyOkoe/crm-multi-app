@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Users, Megaphone, ShoppingCart, Boxes, ClipboardList, BarChart3, Settings, LogOut, Store } from "lucide-react";
+import { LayoutDashboard, Users, Megaphone, ShoppingCart, Boxes, ClipboardList, BarChart3, Settings, LogOut, Store, Wallet, MessageSquare, Clock } from "lucide-react";
 import { useApp } from "@/context/AppContext";
 import { cn, initials } from "@/lib/utils";
 import { ROLE_LABELS } from "@/types";
@@ -20,6 +20,7 @@ const navSections = [
       { href: "/customers", label: "Customers", icon: Users },
       { href: "/leads", label: "Leads & Pipeline", icon: Megaphone },
       { href: "/tasks", label: "Tasks & Follow-ups", icon: ClipboardList },
+      { href: "/marketing", label: "Marketing", icon: MessageSquare },
     ],
   },
   {
@@ -27,6 +28,8 @@ const navSections = [
     items: [
       { href: "/sales", label: "Sales & POS", icon: ShoppingCart },
       { href: "/inventory", label: "Inventory", icon: Boxes },
+      { href: "/expenses", label: "Expenses & P&L", icon: Wallet },
+      { href: "/shifts", label: "Shifts", icon: Clock },
       { href: "/reports", label: "Analytics & Reports", icon: BarChart3 },
     ],
   },

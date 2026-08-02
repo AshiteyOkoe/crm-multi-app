@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import routes from './routes';
 import { notFoundHandler, errorHandler } from './middleware/error';
+import { readOnlyGuard } from './middleware/auth';
 
 const app = express();
 
@@ -12,6 +13,7 @@ app.get('/api/health', (_req, res) => {
   res.json({ success: true, data: { status: 'ok', time: new Date().toISOString() } });
 });
 
+app.use('/api', readOnlyGuard);
 app.use('/api', routes);
 
 app.use(notFoundHandler);
